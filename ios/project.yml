@@ -23,11 +23,11 @@ targets:
     type: application
     platform: iOS
     sources:
+      # XcodeGen picks up .xcassets as a resource automatically; only the generated Info.plist
+      # must be kept out of the compile sources.
       - path: Blu
         excludes:
-          - "Resources/*"
-    resources:
-      - path: Blu/Resources/Assets.xcassets
+          - "Resources/Info.plist"
     info:
       path: Blu/Resources/Info.plist
       properties:
