@@ -36,6 +36,15 @@ against the live service without touching the app.
 * **Persian-first UI.** Right-to-left layout, Persian digits and grouping, server-side localised
   amounts and Jalali dates used verbatim.
 
+## Download the IPA
+
+[`v1.0.0`](https://github.com/rnetis/blu-ios/releases/latest) carries an **unsigned
+`BluClient.ipa`** (+ sha256) built by CI. Install it with AltStore, Sideloadly, or a free Apple ID
+via Xcode — no Mac needed to *build* it, only to sign and install it, and sideloading preserves
+nothing beyond the app bundle (this app stores no credentials anyway).
+
+The first screen offers demo mode, so you can explore the whole interface without an account.
+
 ## Building
 
 ```bash
