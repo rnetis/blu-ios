@@ -44,9 +44,13 @@ struct PBMessage {
     }
 
     private(set) var fields: [Int: [Value]] = [:]
+    /// The exact bytes this message was parsed from — re-encoding a parsed tree is not byte-stable,
+    /// so this is what callers get back for `bytes`-typed fields.
+    private(set) var source = Data()
 
     init?(data: Data, depth: Int = 0) {
         guard depth <= 6 else { return nil }
+        source = data
         var index = data.startIndex
         while index < data.endIndex {
             guard let (key, afterKey) = PBMessage.readVarint(data, index) else { return nil }
@@ -61,17 +65,18 @@ struct PBMessage {
                 fields[field, default: []].append(.varint(value))
                 index = next
             case 1:
-                guard let next = index.advanced(by: 8, limitedBy: data.endIndex) else { return nil }
-                fields[field, default: []].append(.bytes(Data(data[index..<next])))
-                index = next
+                guard index + 8 <= data.endIndex else { return nil }
+                fields[field, default: []].append(.bytes(Data(data[index..<(index + 8)])))
+                index += 8
             case 5:
-                guard let next = index.advanced(by: 4, limitedBy: data.endIndex) else { return nil }
-                fields[field, default: []].append(.bytes(Data(data[index..<next])))
-                index = next
+                guard index + 4 <= data.endIndex else { return nil }
+                fields[field, default: []].append(.bytes(Data(data[index..<(index + 4)])))
+                index += 4
             case 2:
                 guard let (length, afterLength) = PBMessage.readVarint(data, index) else { return nil }
-                guard let end = afterLength.advanced(by: Int(length), limitedBy: data.endIndex),
-                      afterLength <= end else { return nil }
+                let count = Int(length)
+                guard count >= 0, afterLength + count <= data.endIndex else { return nil }
+                let end = afterLength + count
                 let slice = Data(data[afterLength..<end])
                 if let nested = PBMessage(data: slice, depth: depth + 1) {
                     fields[field, default: []].append(.message(nested))
@@ -114,9 +119,9 @@ struct PBMessage {
 
     func data(_ tag: Int) -> Data? {
         switch value(tag) {
-        case .bytes(let d): return d
-        case .message(let m): return m.rawBytes
-        default: return nil
+        case .bytes(let d):   return d
+        case .message(let m): return m.source
+        default:              return nil
         }
     }
 
@@ -126,7 +131,10 @@ struct PBMessage {
     }
 
     func messages(_ tag: Int) -> [PBMessage] {
-        all(tag).compactMap { if case .message(let m) = $0 { return m } else { return nil } }
+        all(tag).compactMap { item in
+            if case .message(let m) = item { return m }
+            return nil
+        }
     }
 
     func string(_ tag: Int) -> String? {

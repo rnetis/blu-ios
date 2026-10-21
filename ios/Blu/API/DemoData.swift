@@ -4,20 +4,23 @@ import Foundation
 /// account data, and the UI labels this mode explicitly.
 enum DemoData {
     static let accounts: [BankAccount] = [
-        BankAccount(id: "1", number: "611828005101688601", iban: "IR710560611828005101688601",
-                    title: "حساب کوتاه‌مدت بلو", subtitle: "حساب اصلی",
+        BankAccount(id: "611828005101688601", number: "611828005101688601",
+                    formatted: "IR - 71 0560 6118 2800 5101 6886 01",
+                    localizedNumber: "۶۱۱۸۲۸۰۰۵۱۰۱۶۸۸۶۰۱",
+                    title: "حساب کوتاه‌مدت", kind: "کوتاه‌مدت", subtitle: "کاربر نمونه",
                     actualBalance: Money(raw: "35263024", display: "۳۵٬۲۶۳٬۰۲۴ ریال"),
                     availableBalance: Money(raw: "35263024", display: "۳۵٬۲۶۳٬۰۲۴ ریال"),
-                    extraBalance: Money(raw: "1140000", display: "۱٬۱۴۰٬۰۰۰ ریال"),
-                    extraTitle: "بلوباکس"),
-        BankAccount(id: "2", number: "611828005101688602", iban: nil,
-                    title: "بلوباکس", subtitle: "پس‌انداز روزانه",
+                    holdingBalance: Money(raw: "1140000", display: "۱٬۱۴۰٬۰۰۰ ریال")),
+        BankAccount(id: "611828005101688602", number: "611828005101688602",
+                    formatted: nil, localizedNumber: "۶۱۱۸۲۸۰۰۵۱۰۱۶۸۸۶۰۲",
+                    title: "بلوباکس", kind: "پس‌انداز", subtitle: "پس‌انداز روزانه",
                     actualBalance: Money(raw: "8600000", display: "۸٬۶۰۰٬۰۰۰ ریال"),
-                    availableBalance: nil, extraBalance: nil, extraTitle: nil),
-        BankAccount(id: "3", number: "611828005101688603", iban: nil,
-                    title: "کیف پول بلو", subtitle: "پرداخت‌های خرد",
+                    availableBalance: nil, holdingBalance: nil),
+        BankAccount(id: "611828005101688603", number: "611828005101688603",
+                    formatted: nil, localizedNumber: "۶۱۱۸۲۸۰۰۵۱۰۱۶۸۸۶۰۳",
+                    title: "کیف پول بلو", kind: "کیف پول", subtitle: "پرداخت‌های خرد",
                     actualBalance: Money(raw: "425000", display: "۴۲۵٬۰۰۰ ریال"),
-                    availableBalance: nil, extraBalance: nil, extraTitle: nil)
+                    availableBalance: nil, holdingBalance: nil)
     ]
 
     static let transactions: [BankTransaction] = [
@@ -48,10 +51,10 @@ enum DemoData {
     ]
 
     static let cards: [BankCard] = [
-        BankCard(id: "c1", number: "6104 3377 **** 6886", holder: "دارنده کارت",
-                 title: "بلوکارت", status: "فعال", expiry: "۰۷/۲۸", cvv2: "***"),
-        BankCard(id: "c2", number: "6104 3377 **** 1420", holder: "دارنده کارت",
-                 title: "کارت مجازی", status: "فعال", expiry: "۰۹/۲۷", cvv2: "***")
+        BankCard(id: "6219861928215820", pan: "6219861928215820", bankName: "بلوبانک",
+                 linkedAccount: "611828005101688601", status: "فعال"),
+        BankCard(id: "6104337712341420", pan: "6104337712341420", bankName: "بلوبانک",
+                 linkedAccount: "611828005101688602", status: "فعال")
     ]
 
     static let profile = UserProfile(username: "demo", fullName: "کاربر نمونه",

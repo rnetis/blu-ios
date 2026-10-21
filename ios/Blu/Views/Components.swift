@@ -63,7 +63,7 @@ struct BalanceCard: View {
 
     private var bottomRow: some View {
         HStack(spacing: 18) {
-            stat(title: "مبلغ بلوکه", value: account?.extraBalance?.display ?? "۰ ریال")
+            stat(title: "مبلغ بلوکه", value: account?.holdingBalance?.display ?? "۰ ریال")
             if isDemo { PillBadge(text: "داده نمایشی", tint: .white) }
             Spacer()
         }

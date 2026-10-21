@@ -15,6 +15,7 @@ final class BluStore: ObservableObject {
     @Published var errorMessage: String?
 
     @Published var accounts: [BankAccount] = []
+    @Published var apiTotal: Money?
     @Published var transactions: [BankTransaction] = []
     @Published var cards: [BankCard] = []
     @Published var profile: UserProfile?
@@ -34,9 +35,10 @@ final class BluStore: ObservableObject {
         accounts.first { $0.id == selectedAccountId } ?? accounts.first
     }
 
-    var totalBalance: Money? {
-        accounts.compactMap(\.actualBalance).first
-    }
+    var isAuthenticated: Bool { client.isAuthenticated }
+
+    /// Total from the API when present, otherwise the first account's actual balance.
+    var totalBalance: Money? { apiTotal ?? accounts.compactMap(\.actualBalance).first }
 
     // MARK: - Lifecycle
 
@@ -125,6 +127,7 @@ final class BluStore: ObservableObject {
         do {
             let accountsResponse = try await client.fetchAccounts()
             accounts = BankAccount.list(from: accountsResponse)
+            apiTotal = BankAccount.total(from: accountsResponse)
             selectedAccountId = accounts.first?.id
             log("\(accounts.count) حساب دریافت شد")
 

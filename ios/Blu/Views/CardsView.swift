@@ -2,8 +2,7 @@ import SwiftUI
 
 struct CardsView: View {
     @EnvironmentObject private var store: BluStore
-    @State private var selected: BankCard?
-    @State private var revealsPan = false
+    @State private var selectedId: String?
 
     var body: some View {
         NavigationStack {
@@ -23,33 +22,33 @@ struct CardsView: View {
         }
     }
 
+    private var current: BankCard? {
+        store.cards.first { $0.id == selectedId } ?? store.cards.first
+    }
+
     private var stack: some View {
         VStack(spacing: 14) {
             ForEach(store.cards) { card in
-                CardVisual(card: card,
-                           isSelected: card.id == (selected?.id ?? store.cards.first?.id),
-                           revealsPan: revealsPan && card.id == (selected?.id ?? store.cards.first?.id))
-                    .onTapGesture {
-                        selected = card
-                        withAnimation(.easeInOut(duration: 0.25)) { revealsPan.toggle() }
-                    }
+                CardVisual(card: card, isSelected: card.id == current?.id)
+                    .onTapGesture { selectedId = card.id }
             }
         }
     }
 
     private var detail: some View {
         Group {
-            if let card = selected ?? store.cards.first {
+            if let card = current {
                 SurfaceCard {
                     VStack(alignment: .leading, spacing: 14) {
                         SectionHeader(title: "اطلاعات کارت")
-                        infoRow(title: "نوع کارت", value: card.title)
+                        infoRow(title: "بانک", value: card.bankName)
                         divider
                         infoRow(title: "وضعیت", value: card.status.isEmpty ? "—" : card.status)
                         divider
-                        infoRow(title: "تاریخ انقضا", value: card.expiry)
+                        infoRow(title: "حساب متصل",
+                                value: card.linkedAccount.map { Persian.groupNumber($0) } ?? "—")
                         divider
-                        infoRow(title: "دارنده", value: card.holder)
+                        infoRow(title: "شماره کارت", value: card.masked)
                     }
                 }
             }
@@ -59,8 +58,11 @@ struct CardsView: View {
     private func infoRow(title: String, value: String) -> some View {
         HStack {
             Text(title).font(.system(size: 13)).foregroundColor(.white.opacity(0.5))
-            Spacer()
-            Text(value).font(.system(size: 13, weight: .medium)).foregroundColor(.white)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white)
+                .lineLimit(1)
         }
     }
 
@@ -73,7 +75,7 @@ struct CardsView: View {
             Image(systemName: "creditcard")
                 .font(.system(size: 26))
                 .foregroundColor(.white.opacity(0.3))
-            Text(store.isDemo ? "در حالت نمایشی کارتی ثبت نشده" : "کارتی برای نمایش نیست")
+            Text(store.isLoading ? "در حال دریافت…" : "کارتی برای نمایش نیست")
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.45))
         }
@@ -82,10 +84,11 @@ struct CardsView: View {
     }
 }
 
+/// A card face. The PAN stays masked: revealing it without a PIN gate is not something this client
+/// does — the official app owns that flow.
 struct CardVisual: View {
     let card: BankCard
     let isSelected: Bool
-    let revealsPan: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -111,7 +114,7 @@ struct CardVisual: View {
 
     private var topRow: some View {
         HStack {
-            Text(card.title)
+            Text(card.bankName)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.white)
             Spacer()
@@ -124,18 +127,12 @@ struct CardVisual: View {
     private var numberRow: some View {
         HStack(spacing: 12) {
             chip
-            Text(revealsPan ? card.masked : maskAll)
+            Text(card.masked)
                 .font(.system(size: 17, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white)
                 .environment(\.layoutDirection, .leftToRight)
             Spacer()
         }
-    }
-
-    private var maskAll: String {
-        let digits = card.number.filter(\.isNumber)
-        let last4 = String(digits.suffix(4))
-        return Persian.digits("•••• •••• •••• \(last4)")
     }
 
     private var chip: some View {
@@ -160,13 +157,15 @@ struct CardVisual: View {
     private var bottomRow: some View {
         HStack(alignment: .bottom) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("دارنده کارت").font(.system(size: 10)).foregroundColor(.white.opacity(0.5))
-                Text(card.holder).font(.system(size: 12, weight: .medium)).foregroundColor(.white)
+                Text("حساب متصل").font(.system(size: 10)).foregroundColor(.white.opacity(0.5))
+                Text(card.linkedAccount.map { Persian.digits(String($0.suffix(4))) } ?? "—")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
-                Text("انقضا").font(.system(size: 10)).foregroundColor(.white.opacity(0.5))
-                Text(card.expiry.isEmpty ? "—" : card.expiry)
+                Text("وضعیت").font(.system(size: 10)).foregroundColor(.white.opacity(0.5))
+                Text(card.status.isEmpty ? "فعال" : card.status)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.white)
             }

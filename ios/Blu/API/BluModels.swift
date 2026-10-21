@@ -1,7 +1,14 @@
 import Foundation
 
-/// Response models mapped from the parsed protobuf tree by field number.
-/// Field numbers come from the schema extracted out of the web client (docs/SCHEMA.md).
+/// Response models mapped from the parsed protobuf tree by field number. The paths below were
+/// checked against real responses (docs/PROTOCOL.md, docs/SCHEMA.md):
+///
+///   AccountListAllResponse { 3: Account*, 6: Amount totalActual, 7: balances* }
+///   Account { 1: AccountIdentifier, 3: type, 5: representations, 6: AccountAmounts,
+///             7: dates, 10: ownerName, 15: localized }
+///   Transaction { 1: id, 2: accountId, 3: category, 4: amounts, 5: dates, 6: type,
+///                 7: status, 10: counterparty, 13: memo, 15: localized }
+///   CardListAllResponse { 3: Card* }, Card { 1: id/pan, 2: CardNumber{1: pan, 2: bank}, 4: linkedAccount }
 
 struct Money: Hashable {
     var raw: String        // machine value, e.g. "35263024.000000"
@@ -19,74 +26,88 @@ struct Money: Hashable {
         self.init(raw: rawValue, display: value.localizedLabel ?? pb.localizedLabel ?? rawValue)
     }
 
+    /// Digits only, in Latin form — used for arithmetic.
+    var digits: String { raw.split(separator: ".").first.map(String.init) ?? raw }
+
+    /// Persian-grouped amount without the currency word, falling back to the server string when the
+    /// machine value is not a plain number (the API encodes some negatives as a nested variant).
     var compact: String {
-        let digits = raw.split(separator: ".").first.map(String.init) ?? raw
-        guard let value = Double(digits) else { return display }
+        guard let value = Double(digits) else { return withoutCurrency }
         return Persian.digits(Persian.grouped(Int(value)))
     }
+
+    var withoutCurrency: String { display.replacingOccurrences(of: " ریال", with: "") }
 }
 
 struct BankAccount: Identifiable, Hashable {
     var id: String
     var number: String            // "611828005101688601"
-    var iban: String?
-    var title: String             // "بلو" / "کوتاهمدت"
-    var subtitle: String          // owner or description
+    var formatted: String?        // "IR - 71 0560 6118 2800 5101 6886 01"
+    var localizedNumber: String?  // "۶۱۱۸۲۸۰۰۵۱۰۱۶۸۸۶۰۱"
+    var title: String             // "حساب کوتاهمدت"
+    var kind: String              // "کوتاهمدت"
+    var subtitle: String          // owner name
     var actualBalance: Money?
     var availableBalance: Money?
-    var extraBalance: Money?
-    var extraTitle: String?
+    var holdingBalance: Money?
 
-    init(id: String, number: String, iban: String?, title: String, subtitle: String,
-         actualBalance: Money?, availableBalance: Money?, extraBalance: Money?, extraTitle: String?) {
+    init(id: String, number: String, formatted: String?, localizedNumber: String?, title: String,
+         kind: String, subtitle: String, actualBalance: Money?, availableBalance: Money?,
+         holdingBalance: Money?) {
         self.id = id
         self.number = number
-        self.iban = iban
+        self.formatted = formatted
+        self.localizedNumber = localizedNumber
         self.title = title
+        self.kind = kind
         self.subtitle = subtitle
         self.actualBalance = actualBalance
         self.availableBalance = availableBalance
-        self.extraBalance = extraBalance
-        self.extraTitle = extraTitle
+        self.holdingBalance = holdingBalance
     }
 
-    var numberGrouped: String { Persian.groupNumber(number) }
+    var numberGrouped: String { localizedNumber ?? Persian.groupNumber(number) }
 
     static func list(from response: PBMessage) -> [BankAccount] {
         response.messages(3).compactMap(BankAccount.init(pb:))
     }
 
+    static func total(from response: PBMessage) -> Money? {
+        response.message(6).flatMap(Money.init(pb:))
+    }
+
     init?(pb: PBMessage) {
         guard let identifier = pb.message(1) else { return nil }
-        number = identifier.string(1) ?? identifier.strings(1).first ?? "-"
+        number = identifier.string(1) ?? "-"
         id = number
-        iban = identifier.message(3)?.string(1)
-        title = identifier.localizedLabel ?? identifier.string(15) ?? "حساب"
-        subtitle = pb.message(10)?.localizedLabel ?? pb.string(15) ?? ""
+        formatted = identifier.string(14)
+        localizedNumber = identifier.string(15)
+        kind = pb.message(3)?.localizedLabel ?? ""
+        title = pb.string(15) ?? (kind.isEmpty ? "حساب" : kind)
+        subtitle = pb.message(10)?.localizedLabel ?? ""
 
         let amounts = pb.message(6)
         actualBalance = amounts?.message(1).flatMap(Money.init(pb:))
         availableBalance = amounts?.message(2).flatMap(Money.init(pb:))
-        extraBalance = amounts?.message(4).flatMap(Money.init(pb:))
-        extraTitle = "بلو باکس"
+        holdingBalance = amounts?.message(4).flatMap(Money.init(pb:))
     }
 }
 
 struct BankTransaction: Identifiable, Hashable {
     var id: String
-    var title: String            // counterparty / localized description
-    var subtitle: String
+    var title: String            // category, e.g. "خرید از فروشگاه"
+    var subtitle: String         // counterparty / memo
     var category: String
-    var iconName: String         // SF Symbol chosen from the merchant category
+    var iconName: String         // SF Symbol derived from the server's icon slug
     var amount: Money?
-    var isCredit: Bool
-    var date: String             // server-localised Persian date
-    var time: String
-    var status: String
+    var isCredit: Bool           // type(6) == 2 ("بستانکار")
+    var date: String             // "۲۸ مهر ۱۴۰۵"
     var dayKey: String
+    var time: String             // "۲۲:۳۰"
+    var status: String
 
     init(id: String, title: String, subtitle: String, category: String, iconName: String,
-         amount: Money?, isCredit: Bool, date: String, time: String, status: String, dayKey: String) {
+         amount: Money?, isCredit: Bool, date: String, dayKey: String, time: String, status: String) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
@@ -95,9 +116,9 @@ struct BankTransaction: Identifiable, Hashable {
         self.amount = amount
         self.isCredit = isCredit
         self.date = date
+        self.dayKey = dayKey
         self.time = time
         self.status = status
-        self.dayKey = dayKey
     }
 
     static func list(from response: PBMessage) -> [BankTransaction] {
@@ -106,64 +127,86 @@ struct BankTransaction: Identifiable, Hashable {
 
     init?(pb: PBMessage) {
         id = pb.string(1) ?? UUID().uuidString
-        let counterparty = pb.message(10)
-        title = counterparty?.localizedLabel ?? pb.string(15) ?? pb.string(14) ?? "تراکنش"
-        subtitle = pb.string(13) ?? pb.string(20) ?? pb.string(14) ?? ""
 
         let categoryMessage = pb.message(3)
-        category = categoryMessage?.string(2) ?? pb.message(16)?.localizedLabel ?? "سایر"
-        iconName = BankTransaction.icon(for: category)
+        category = categoryMessage?.string(2) ?? ""
+        title = category.isEmpty ? "تراکنش" : category
+        iconName = BankTransaction.icon(forSlug: BankTransaction.slug(from: categoryMessage?.message(1)))
+
+        subtitle = pb.message(10)?.localizedLabel ?? pb.string(13) ?? pb.string(14) ?? ""
 
         amount = pb.message(4)?.message(1).flatMap(Money.init(pb:))
-        let rawValue = Double(amount?.raw.split(separator: ".").first.map(String.init) ?? "0") ?? 0
-        isCredit = rawValue >= 0
+        isCredit = pb.message(6)?.int(1) == 2
 
-        let dates = pb.message(5)
-        let posted = dates?.message(1)
-        date = posted?.localizedLabel ?? "—"
-        dayKey = posted?.descendantString(14) ?? date
-        time = posted?.descendantString(12) ?? ""
+        let posted = pb.message(5)?.message(1)
+        let localizedDate = posted?.message(2)
+        date = localizedDate?.string(2) ?? localizedDate?.string(1) ?? "—"
+        dayKey = date
+        time = posted?.message(3)?.string(1) ?? ""
         status = pb.message(7)?.localizedLabel ?? ""
     }
 
+    /// The server ships an icon asset path such as
+    /// `/images/transaction-icon/light-dark/payment-pos/svg/payment-pos.svg`; the slug names the
+    /// transaction category, which is what turns into an SF Symbol.
+    static func slug(from iconAsset: PBMessage?) -> String {
+        guard let iconAsset else { return "" }
+        for value in iconAsset.descendantStrings(3, maxDepth: 4) {
+            guard let range = value.range(of: "transaction-icon/") else { continue }
+            let rest = value[range.upperBound...]
+            let parts = rest.split(separator: "/")
+            if parts.count >= 2 { return String(parts[1]) }
+        }
+        return ""
+    }
+
+    static func icon(forSlug slug: String) -> String {
+        switch slug {
+        case "payment-pos":         return "cart.fill"
+        case "remittance-transfer": return "arrow.left.arrow.right"
+        case "deposit-transfer":    return "arrow.down.circle.fill"
+        case "withdrawal":          return "arrow.up.circle.fill"
+        case "bill":                return "doc.text.fill"
+        case "topup", "top-up":     return "antenna.radiowaves.left.and.right"
+        case "loan", "installment": return "calendar.badge.clock"
+        case "cashback", "reward":  return "gift.fill"
+        case "fee", "toll":         return "road.lanes"
+        default:                    return "creditcard.fill"
+        }
+    }
+
     static func icon(for category: String) -> String {
-        let key = category.lowercased()
-        if key.contains("خرید") || key.contains("فروشگاه") { return "cart.fill" }
-        if key.contains("انتقال") || key.contains("کارت")     { return "arrow.left.arrow.right" }
-        if key.contains("شارژ")                              { return "antenna.radiowaves.left.and.right" }
-        if key.contains("قبض") || key.contains("عوارض")       { return "doc.text.fill" }
-        if key.contains("حقوق") || key.contains("واریز")      { return "arrow.down.circle.fill" }
-        if key.contains("ناموفق") || key.contains("لغو")      { return "xmark.circle.fill" }
-        if key.contains("رستوران") || key.contains("کافه")    { return "cup.and.saucer.fill" }
+        if category.contains("خرید") || category.contains("فروشگاه") { return "cart.fill" }
+        if category.contains("انتقال") || category.contains("کارت")   { return "arrow.left.arrow.right" }
+        if category.contains("شارژ")                                 { return "antenna.radiowaves.left.and.right" }
+        if category.contains("قبض") || category.contains("عوارض")     { return "doc.text.fill" }
+        if category.contains("دریافت") || category.contains("سپرده")  { return "arrow.down.circle.fill" }
+        if category.contains("رستوران") || category.contains("کافه")  { return "cup.and.saucer.fill" }
         return "creditcard.fill"
     }
 }
 
 struct BankCard: Identifiable, Hashable {
     var id: String
-    var number: String           // masked PAN pieces
-    var holder: String
-    var title: String
+    var pan: String              // full PAN as returned by the API
+    var bankName: String
+    var linkedAccount: String?
     var status: String
-    var expiry: String
-    var cvv2: String?
 
-    init(id: String, number: String, holder: String, title: String, status: String,
-         expiry: String, cvv2: String?) {
+    init(id: String, pan: String, bankName: String, linkedAccount: String?, status: String) {
         self.id = id
-        self.number = number
-        self.holder = holder
-        self.title = title
+        self.pan = pan
+        self.bankName = bankName
+        self.linkedAccount = linkedAccount
         self.status = status
-        self.expiry = expiry
-        self.cvv2 = cvv2
     }
 
-    var last4: String { String(number.filter(\.isNumber).suffix(4)) }
+    var last4: String { String(pan.filter(\.isNumber).suffix(4)) }
 
+    /// The app never displays the full PAN — a PIN-gated reveal belongs in the official app.
     var masked: String {
-        let digits = number.filter(\.isNumber)
-        guard digits.count >= 8 else { return number }
+        let digits = pan.filter(\.isNumber)
+        guard digits.count >= 8 else { return pan }
         return Persian.digits(String(digits.prefix(4))) + " •••• •••• "
             + Persian.digits(String(digits.suffix(4)))
     }
@@ -173,14 +216,13 @@ struct BankCard: Identifiable, Hashable {
     }
 
     init?(pb: PBMessage) {
-        id = pb.string(1) ?? UUID().uuidString
-        let numberMessage = pb.message(2)
-        number = numberMessage?.string(1) ?? numberMessage?.descendantString(1) ?? "-"
-        holder = pb.message(3)?.localizedLabel ?? "-"
-        title = pb.message(5)?.localizedLabel ?? "بلوکارت"
+        let number = pb.message(2)?.string(1) ?? pb.string(1)
+        guard let number, !number.isEmpty else { return nil }
+        pan = number
+        id = pb.string(1) ?? number
+        bankName = pb.message(2)?.message(2)?.localizedLabel ?? "کارت"
+        linkedAccount = pb.message(4)?.message(1)?.string(1)
         status = pb.message(6)?.localizedLabel ?? ""
-        expiry = pb.message(8)?.localizedLabel ?? ""
-        cvv2 = pb.message(9)?.descendantString(1)
     }
 }
 
@@ -194,13 +236,12 @@ struct UserProfile: Hashable {
 
     static func from(response: PBMessage) -> UserProfile? {
         guard let user = response.message(2) else { return nil }
-        let person = user.message(2) ?? response.message(3)
-        let name = person?.descendantString(10) ?? user.descendantString(10) ?? ""
+        let person = response.message(3)
         return UserProfile(
             username: user.string(1) ?? "-",
-            fullName: person?.localizedLabel ?? name,
-            nationalCode: person?.descendantString(3) ?? user.string(2) ?? "-",
-            phone: user.string(5) ?? user.descendantString(5) ?? "-",
+            fullName: person?.localizedLabel ?? user.localizedLabel ?? user.string(1) ?? "کاربر",
+            nationalCode: person?.descendantString(3) ?? user.descendantString(3) ?? "—",
+            phone: user.string(5) ?? user.descendantString(5) ?? "—",
             birthDate: person?.descendantString(4) ?? "—",
             address: person?.descendantString(11) ?? "—"
         )
