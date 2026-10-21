@@ -76,8 +76,8 @@ enum DemoData {
                                amount: Money(raw: clean, display: clean + " ریال"),
                                isCredit: !negative,
                                date: date,
+                               dayKey: date,
                                time: time,
-                               status: "موفق",
-                               dayKey: date)
+                               status: "موفق")
     }
 }

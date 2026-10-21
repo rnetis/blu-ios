@@ -165,19 +165,18 @@ struct PBMessage {
     /// The nearest Persian human-readable label anywhere in this subtree.
     var localizedLabel: String? { descendantString(15) }
 
-    var rawBytes: Data {
-        var out = Data()
-        for (tag, values) in fields {
-            for value in values {
-                switch value {
-                case .varint(let v): out += PB.int(tag, v)
-                case .bytes(let d): out += PB.bytes(tag, d)
-                case .message(let m):
-                    let body = m.rawBytes
-                    out += PB.bytes(tag, body)
-                }
+    /// Every descendant value of a tag, in depth-first order.
+    func descendantStrings(_ tag: Int, maxDepth: Int = 6) -> [String] {
+        var out: [String] = []
+        if let s = string(tag), !s.isEmpty { out.append(s) }
+        guard maxDepth > 0 else { return out }
+        for values in fields.values {
+            for case let .message(nested) in values {
+                out += nested.descendantStrings(tag, maxDepth: maxDepth - 1)
             }
         }
         return out
     }
+
+    var rawBytes: Data { source }
 }
