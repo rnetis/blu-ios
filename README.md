@@ -45,6 +45,10 @@ nothing beyond the app bundle (this app stores no credentials anyway).
 
 The first screen offers demo mode, so you can explore the whole interface without an account.
 
+*v1.0.1 fixes the one-time-code step: the on-screen keyboard now opens (the digit boxes are the
+tap target, with focus taken automatically on appear), and the `otp_request` id from the login
+response's deep link is parsed and echoed back — without it the verify call could not succeed.*
+
 ## Building
 
 ```bash

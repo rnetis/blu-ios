@@ -101,6 +101,19 @@ Used for `Password{ encoded(1) }` (login) and `OneTimePin{ …(1) }` (OTP verify
 
    Response carries `authenticationToken(2)` (a limited JWT) and a `navigationUri(5)` deep link
    such as `blubank://app/navigate?page=login/device-verify&otp_request=…&masked_phone=…`.
+
+   The `otp_request` parameter is *itself* a base64-encoded `OTPRequest` protobuf, not a bare id:
+
+   ```
+   CiQwYTRhY2FjYy03Mzc5LTQ4OWEtOWFhZC00NDBkYWI2NTQ3NzASCwj7rODWBhC878E6GgIIdw==
+   → { id(1): "0a4acacc-7379-489a-9aad-440dab654770",
+       issued(2): { seconds(1): 1792546427, nanos(2): 753000000 },
+       kind(3): { 1: 119 } }
+   ```
+
+   Those three values (id, issued.seconds, kind) are what step 3 must echo back; an empty or stale id
+   is rejected. The code itself is **6 digits**, readable off the captured ciphertext length
+   (34 bytes = 12-byte IV + 16-byte tag + 6 bytes of plaintext).
 3. `user/otp/verify`:
 
    ```
@@ -134,3 +147,8 @@ unknown username, undecryptable password — to gRPC `code 13 Internal Server Er
 probe with invented credentials cannot distinguish "wrong credentials" from "wrong protocol";
 the error surface simply does not discriminate. The app is therefore built to show exactly what
 the server answered, and to be usable in demo mode without any account.
+
+Client-side detail recovered later: `navigationUri(5)` carries the challenge as a query parameter,
+`otp_request` is a base64 `OTPRequest` protobuf whose `id`/`issued.seconds`/`kind` must be echoed in
+`UserOTPVerifyRequest.otpRequest`, and the code is 6 digits. Without parsing that deep link the verify
+call sends an empty id and cannot succeed.
