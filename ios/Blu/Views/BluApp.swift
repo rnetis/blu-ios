@@ -2,8 +2,12 @@ import SwiftUI
 
 @main
 struct BluApp: App {
-    static let version = "1.0.0"
-    static let build = "1"
+    /// Read from the bundle so the version shown in the UI cannot drift from project.yml.
+    static var version: String {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(short) (\(build))"
+    }
 
     @StateObject private var store = BluStore()
 

@@ -24,6 +24,7 @@ final class BluStore: ObservableObject {
 
     @Published var otpMaskedPhone = ""
     @Published var otpRequestId: String?
+    @Published var otpChallenge: OTPChallenge?
     @Published var otpSecondsLeft = 0
 
     @Published var diagnostics: [String] = []
@@ -71,7 +72,18 @@ final class BluStore: ObservableObject {
         log("حالت نمایشی فعال شد (دادهها نمونه هستند)")
     }
 
+    func cancelOTP() {
+        stopOTPTimer()
+        otpChallenge = nil
+        otpRequestId = nil
+        errorMessage = nil
+        phase = .login
+    }
+
     func logout() {
+        stopOTPTimer()
+        otpChallenge = nil
+        otpRequestId = nil
         client.resetSession()
         accounts = []
         transactions = []
@@ -90,12 +102,23 @@ final class BluStore: ObservableObject {
         statusLine = "در حال ورود…"
         do {
             if !client.isKeyEstablished { try await client.keyExchange() }
-            try await client.login(username: username, password: password)
-            log("ورود پذیرفته شد — توکن دریافت شد")
-            statusLine = "کد پیامکشده را وارد کنید"
-            otpMaskedPhone = maskedPhone(from: username)
-            phase = .otp
-            startOTPTimer()
+            let outcome = try await client.login(username: username, password: password)
+            switch outcome {
+            case .otpRequested(let challenge):
+                log("ورود پذیرفته شد — کد یک‌بارمصرف درخواست شد (\(challenge.requestId.prefix(8))…)")
+                otpChallenge = challenge
+                otpRequestId = challenge.requestId
+                otpMaskedPhone = challenge.maskedPhone.isEmpty
+                    ? maskedPhone(from: username)
+                    : challenge.maskedPhone
+                statusLine = "کد پیامک‌شده را وارد کنید"
+                phase = .otp
+                startOTPTimer()
+            case .authenticated:
+                log("ورود کامل شد — توکن دریافت شد")
+                phase = .home
+                await loadAll()
+            }
         } catch {
             errorMessage = error.localizedDescription
             log("ورود ناموفق: \(error.localizedDescription)")
@@ -105,11 +128,15 @@ final class BluStore: ObservableObject {
     }
 
     func verify(code: String) async {
-        let requestId = otpRequestId ?? ""
+        guard let challenge = otpChallenge else {
+            errorMessage = "درخواست کد پیدا نشد؛ دوباره وارد شوید."
+            phase = .login
+            return
+        }
         isLoading = true
         errorMessage = nil
         do {
-            try await client.verifyOTP(otpRequestId: requestId, issueTimestamp: 0, code: code)
+            try await client.verifyOTP(challenge: challenge, code: code)
             log("کد تأیید شد — نشست کامل شد")
             phase = .home
             stopOTPTimer()

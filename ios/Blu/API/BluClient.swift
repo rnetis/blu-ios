@@ -20,6 +20,22 @@ enum BluError: LocalizedError {
     }
 }
 
+/// The one-time-code challenge the login response hands back. The server returns it inside a deep
+/// link — `blubank://app/navigate?page=login/device-verify&otp_request=<base64>&masked_phone=…` —
+/// where the `otp_request` parameter is itself a base64-encoded OTPRequest protobuf:
+/// `{ id(1) string, issued(2){ seconds(1) }, kind(3){ … } }`. The verify call must echo those values.
+struct OTPChallenge: Equatable {
+    var requestId: String
+    var kind: Int
+    var issuedAt: UInt64
+    var maskedPhone: String
+}
+
+enum LoginOutcome {
+    case otpRequested(OTPChallenge)
+    case authenticated
+}
+
 /// One HTTP round trip against the openapi gateway.
 ///
 /// Every call carries a `RequestContext` (request id, app/device identity, platform, locale) and —
@@ -168,7 +184,9 @@ final class BluClient {
     }
 
     /// Public: username + password. The password travels AES-256-GCM encrypted under the session key.
-    func login(username: String, password: String) async throws {
+    /// Returns `.otpRequested` when the server wants a one-time code, `.authenticated` when the
+    /// token is already complete.
+    func login(username: String, password: String) async throws -> LoginOutcome {
         guard let aesKey else { throw BluError.crypto("کلید نشست ساخته نشده است") }
         let id = requestIdentifier()
         let context = context(requestId: id.bytes, authenticated: false)
@@ -192,18 +210,71 @@ final class BluClient {
         let response = try await send(service: "SessionLogin", path: "session/login",
                                       body: body, authenticated: false, requestId: id.string)
         try applyToken(from: response)
+        if let challenge = BluClient.otpChallenge(from: response) {
+            return .otpRequested(challenge)
+        }
+        return .authenticated
+    }
+
+    /// Pulls the deep link out of `SessionLoginResponse.navigationUri(5)` (a `URIAsset`-style
+    /// message whose string value sits at tag 1) and turns it into a usable challenge.
+    static func otpChallenge(from response: PBMessage) -> OTPChallenge? {
+        guard let link = navigationLink(from: response) else { return nil }
+        let query = queryItems(from: link)
+        guard let encoded = query["otp_request"], !encoded.isEmpty else { return nil }
+
+        var identifier = encoded
+        var kind = 119
+        var issued = UInt64(Date().timeIntervalSince1970)
+        if let data = decodeBase64(encoded), let request = PBMessage(data: data) {
+            identifier = request.string(1) ?? encoded
+            kind = Int(request.message(3)?.int(1) ?? 119)
+            issued = request.message(2)?.int(1) ?? issued
+        }
+        return OTPChallenge(requestId: identifier, kind: kind, issuedAt: issued,
+                            maskedPhone: query["masked_phone"] ?? "")
+    }
+
+    static func navigationLink(from response: PBMessage) -> String? {
+        var candidates: [String] = []
+        if let uri = response.message(5) {
+            candidates += uri.descendantStrings(1, maxDepth: 5)
+        }
+        candidates += response.descendantStrings(1, maxDepth: 4)
+        return candidates.first { $0.contains("blubank://") }
+    }
+
+    static func queryItems(from link: String) -> [String: String] {
+        guard let mark = link.firstIndex(of: "?") else { return [:] }
+        var out: [String: String] = [:]
+        for pair in link[link.index(after: mark)...].split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard let name = parts.first.map(String.init) else { continue }
+            let raw = parts.count > 1 ? String(parts[1]) : ""
+            out[name] = raw.removingPercentEncoding ?? raw
+        }
+        return out
+    }
+
+    /// Standard base64, with a fallback for the URL-safe alphabet.
+    static func decodeBase64(_ text: String) -> Data? {
+        if let data = Data(base64Encoded: text) { return data }
+        var normalized = text.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while normalized.count % 4 != 0 { normalized += "=" }
+        return Data(base64Encoded: normalized)
     }
 
     /// Public: verifies the one-time code and receives the full session token.
-    func verifyOTP(otpRequestId: String, issueTimestamp: UInt64, code: String) async throws {
+    func verifyOTP(challenge: OTPChallenge, code: String) async throws {
         guard let aesKey else { throw BluError.crypto("کلید نشست ساخته نشده است") }
         let id = requestIdentifier()
         let context = context(requestId: id.bytes, authenticated: bearer != nil)
 
         let encryptedPin = try BluCrypto.encrypt(Data(code.utf8), key: aesKey)
-        var otpRequest = PB.string(1, otpRequestId)
-        otpRequest += PB.message(2, PB.int(1, issueTimestamp))
-        otpRequest += PB.message(3, PB.int(1, 119))
+        var otpRequest = PB.string(1, challenge.requestId)
+        otpRequest += PB.message(2, PB.int(1, challenge.issuedAt))
+        otpRequest += PB.message(3, PB.int(1, challenge.kind))
 
         var body = PB.message(1, context)
         body += PB.message(2, otpRequest)

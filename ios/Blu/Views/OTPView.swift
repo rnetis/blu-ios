@@ -1,10 +1,17 @@
 import SwiftUI
 
-/// One-time-code entry. The code is AES-256-GCM encrypted under the session key before it leaves
-/// the device, exactly like the password.
+/// One-time-code entry. The code is AES-256-GCM encrypted under the session key before it leaves the
+/// device, exactly like the password.
+///
+/// The digit boxes are the tap target and the text field is an invisible overlay on top of them, so
+/// tapping the boxes — the obvious thing to do — raises the numeric keyboard. The screen also
+/// focuses itself on appear and declares `.oneTimeCode` so iOS can autofill the SMS code.
 struct OTPView: View {
     @EnvironmentObject private var store: BluStore
     @State private var code = ""
+    @FocusState private var codeFocused: Bool
+
+    private let codeLength = 6
 
     var body: some View {
         ScrollView {
@@ -17,6 +24,16 @@ struct OTPView: View {
             }
             .padding(24)
         }
+        .scrollDismissesKeyboard(.never)
+        .contentShape(Rectangle())
+        .onTapGesture { codeFocused = true }
+        .task { await focusSoon() }
+    }
+
+    private func focusSoon() async {
+        // Focusing in the same run loop as the phase change is unreliable; a short delay works.
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        codeFocused = true
     }
 
     private var header: some View {
@@ -31,37 +48,59 @@ struct OTPView: View {
             Text("کد تأیید را وارد کنید")
                 .font(.system(size: 21, weight: .bold))
                 .foregroundColor(.white)
-            Text("کد پیامک‌شده به \(store.otpMaskedPhone) را وارد کنید")
+            Text(phoneLine)
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
         }
     }
 
+    private var phoneLine: String {
+        let masked = store.otpMaskedPhone
+        return masked.isEmpty ? "کد پیامک‌شده را وارد کنید" : "کد پیامک‌شده به \(masked) را وارد کنید"
+    }
+
     private var codeField: some View {
         SurfaceCard {
             VStack(spacing: 14) {
                 boxes
-                TextField("کد ۵ رقمی", text: $code)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.center)
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .environment(\.layoutDirection, .leftToRight)
-                    .onChange(of: code) { newValue in
-                        let filtered = newValue.filter(\.isNumber)
-                        code = String(filtered.prefix(5))
-                    }
+                Text("برای وارد کردن کد، روی خانه‌ها بزنید")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
             }
         }
     }
 
     private var boxes: some View {
-        HStack(spacing: 10) {
-            ForEach(0..<5, id: \.self) { index in
-                OTPBox(character: character(at: index))
+        ZStack {
+            HStack(spacing: 9) {
+                ForEach(0..<codeLength, id: \.self) { index in
+                    OTPBox(character: character(at: index), isActive: index == code.count)
+                }
             }
+            codeInput
         }
+        .contentShape(Rectangle())
+        .onTapGesture { codeFocused = true }
+    }
+
+    /// Invisible text field stretched over the boxes: it owns the keyboard, the boxes own the looks.
+    private var codeInput: some View {
+        TextField("", text: $code)
+            .keyboardType(.numberPad)
+            .textContentType(.oneTimeCode)
+            .focused($codeFocused)
+            .foregroundColor(.clear)
+            .tint(.clear)
+            .opacity(0.02)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .accessibilityLabel("کد تأیید")
+            .onChange(of: code) { newValue in
+                let filtered = newValue.filter(\.isNumber)
+                if filtered != newValue {
+                    code = String(filtered.prefix(codeLength))
+                }
+            }
     }
 
     private func character(at index: Int) -> String {
@@ -72,6 +111,7 @@ struct OTPView: View {
 
     private var verifyButton: some View {
         Button {
+            codeFocused = false
             Task { await store.verify(code: code) }
         } label: {
             HStack(spacing: 10) {
@@ -98,7 +138,8 @@ struct OTPView: View {
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.5))
             Button("تغییر نام کاربری") {
-                store.phase = .login
+                codeFocused = false
+                store.cancelOTP()
             }
             .font(.system(size: 13, weight: .semibold))
             .foregroundColor(.bluAccent)
@@ -109,6 +150,7 @@ struct OTPView: View {
 
 struct OTPBox: View {
     let character: String
+    var isActive = false
 
     var body: some View {
         ZStack {
@@ -116,13 +158,18 @@ struct OTPBox: View {
                 .fill(Color.bluSurfaceHigh)
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(character.isEmpty ? Color.white.opacity(0.08) : Color.bluAccent.opacity(0.6),
-                                lineWidth: 1)
+                        .stroke(borderColor, lineWidth: isActive ? 1.6 : 1)
                 )
             Text(character)
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.white)
         }
         .frame(height: 56)
+        .animation(.easeInOut(duration: 0.15), value: isActive)
+    }
+
+    private var borderColor: Color {
+        if isActive { return .bluAccent }
+        return character.isEmpty ? Color.white.opacity(0.08) : Color.bluAccent.opacity(0.45)
     }
 }
